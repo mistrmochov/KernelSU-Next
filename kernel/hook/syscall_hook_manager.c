@@ -5,6 +5,7 @@
 #include <asm/syscall.h>
 #include <linux/ptrace.h>
 #include <linux/slab.h>
+#include <trace/events/sched.h>
 #include <trace/events/syscalls.h>
 
 #include <linux/version.h>
@@ -23,6 +24,10 @@
 #include "hook/syscall_event_bridge.h"
 
 #ifdef CONFIG_KRETPROBES
+
+static bool enable_tracepoints = true;
+
+static int init_pid_global = 0;
 
 static struct kretprobe *init_kretprobe(const char *name, kretprobe_handler_t handler)
 {
@@ -59,6 +64,10 @@ static int syscall_regfunc_handler(struct kretprobe_instance *ri, struct pt_regs
 {
     unsigned long flags;
     ksu_tp_marker_lock(&flags);
+#ifdef CONFIG_KSU_NON_ANDROID
+    // unmark all process for security reason
+    ksu_unmark_all_process();
+#else
     if (ksu_tp_marker_reg_count() < 1) {
         // while install our tracepoint, mark our processes
         ksu_mark_running_process_locked();
@@ -66,6 +75,7 @@ static int syscall_regfunc_handler(struct kretprobe_instance *ri, struct pt_regs
         // while other tracepoint first added, mark all processes
         ksu_mark_all_process();
     }
+#endif
     ksu_tp_marker_inc_reg_count();
     ksu_tp_marker_unlock(&flags);
     return 0;
@@ -76,6 +86,7 @@ static int syscall_unregfunc_handler(struct kretprobe_instance *ri, struct pt_re
     unsigned long flags;
     ksu_tp_marker_lock(&flags);
     ksu_tp_marker_dec_reg_count();
+#ifndef CONFIG_KSU_NON_ANDROID
     if (ksu_tp_marker_reg_count() <= 0) {
         // while no tracepoint left, unmark all processes
         ksu_unmark_all_process();
@@ -83,6 +94,7 @@ static int syscall_unregfunc_handler(struct kretprobe_instance *ri, struct pt_re
         // while just our tracepoint left, unmark disallowed processes
         ksu_mark_running_process_locked();
     }
+#endif
     ksu_tp_marker_unlock(&flags);
     return 0;
 }
@@ -121,6 +133,30 @@ static void ksu_sys_enter_handler(void *data, struct pt_regs *regs, long id)
 }
 #endif
 
+#ifdef CONFIG_KSU_NON_ANDROID
+static void ksu_exec_handler(void *data, struct task_struct *p, pid_t old_pid, struct linux_binprm *bprm)
+{
+    // Set tracepoint flag for init process
+    if (unlikely(enable_tracepoints && task_pid_vnr(p) == 1 && strcmp(bprm->filename, "/system/bin/init") == 0)) {
+        init_pid_global = p->pid;
+        pr_info("hook_manager: Android init (PID %i) namespace started\n", init_pid_global);
+        ksu_set_task_tracepoint_flag(p);
+    }
+}
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 16, 0)
+static void ksu_exit_handler(void *data, struct task_struct *p, bool group_dead)
+#else
+static void ksu_exit_handler(void *data, struct task_struct *p)
+#endif
+{
+    if (unlikely(enable_tracepoints && p->pid == init_pid_global)) {
+        enable_tracepoints = false;
+        pr_info("hook_manager: Android init (PID %i) namespace died\n", init_pid_global);
+    }
+}
+#endif
+
 void __init ksu_syscall_hook_manager_init(void)
 {
     int ret;
@@ -149,6 +185,26 @@ void __init ksu_syscall_hook_manager_init(void)
     }
 #endif
 
+#ifdef CONFIG_KSU_NON_ANDROID
+    ret = register_trace_sched_process_exec(ksu_exec_handler, NULL);
+
+    if (ret) {
+        pr_err("hook_manager: failed to register sched_process_exec tracepoint: %d\n",
+               ret);
+    } else {
+        pr_info("hook_manager: sched_process_exec tracepoint registered\n");
+    }
+
+    ret = register_trace_sched_process_exit(ksu_exit_handler, NULL);
+
+    if (ret) {
+        pr_err("hook_manager: failed to register sched_process_exit tracepoint: %d\n",
+               ret);
+    } else {
+        pr_info("hook_manager: sched_process_exit tracepoint registered\n");
+    }
+#endif
+
     ksu_setuid_hook_init();
     ksu_sucompat_init();
     ksu_avc_spoof_init();
@@ -161,6 +217,16 @@ void __exit ksu_syscall_hook_manager_exit(void)
     unregister_trace_sys_enter(ksu_sys_enter_handler, NULL);
     tracepoint_synchronize_unregister();
     pr_info("hook_manager: sys_enter tracepoint unregistered\n");
+#endif
+
+#ifdef CONFIG_KSU_NON_ANDROID
+    unregister_trace_sched_process_exec(ksu_exec_handler, NULL);
+    tracepoint_synchronize_unregister();
+    pr_info("hook_manager: sched_process_exec tracepoint unregistered\n");
+
+    unregister_trace_sched_process_exit(ksu_exit_handler, NULL);
+    tracepoint_synchronize_unregister();
+    pr_info("hook_manager: sched_process_exit tracepoint unregistered\n");
 #endif
 
 #ifdef CONFIG_KRETPROBES
