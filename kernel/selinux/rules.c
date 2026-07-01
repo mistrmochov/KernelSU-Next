@@ -1,3 +1,4 @@
+#ifdef CONFIG_KSU_SELINUX
 #include "linux/rcupdate.h"
 #include "security.h"
 #include <linux/uaccess.h>
@@ -554,3 +555,4 @@ out_free:
 
     return ret;
 }
+#endif
