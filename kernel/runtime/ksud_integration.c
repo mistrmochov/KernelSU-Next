@@ -1,4 +1,6 @@
+#ifdef CONFIG_KSU_SELINUX
 #include "feature/selinux_hide.h"
+#endif
 #include <linux/rcupdate.h>
 #include <linux/slab.h>
 #include <linux/mm.h>
@@ -52,7 +54,9 @@ static const char KERNEL_SU_RC[] =
 static void stop_init_rc_hook();
 static void stop_execve_hook();
 
+#ifdef CONFIG_KSU_HANDLE_INPUT_EVENT
 static struct work_struct stop_input_hook_work;
+#endif
 
 #define MAX_ARG_STRINGS 0x7FFFFFFF
 struct user_arg_ptr {
@@ -160,10 +164,12 @@ void ksu_handle_execveat_ksud(const char *path, struct user_arg_ptr *argv)
         char buf[16];
         if (!init_second_stage_executed && check_argv(*argv, 1, "second_stage", buf, sizeof(buf))) {
             pr_info("/system/bin/init second_stage executed\n");
+#ifdef CONFIG_KSU_SELINUX
             ksu_selinux_hide_handle_second_stage();
             apply_kernelsu_rules();
             cache_sid();
             setup_ksu_cred();
+#endif
             init_second_stage_executed = true;
         }
     }
@@ -469,6 +475,7 @@ static void ksu_handle_sys_read(unsigned int fd, char __user **buf_ptr, size_t *
     fput(file);
 }
 
+#ifdef CONFIG_KSU_HANDLE_INPUT_EVENT
 static unsigned int volumedown_pressed_count = 0;
 
 static bool is_volumedown_enough(unsigned int count)
@@ -518,6 +525,7 @@ bool ksu_is_safe_mode()
 
     return false;
 }
+#endif
 
 void ksu_execve_hook_ksud(const struct pt_regs *regs)
 {
@@ -596,6 +604,7 @@ static long ksu_sys_fstat(const struct pt_regs *regs)
     return ret;
 }
 
+#ifdef CONFIG_KSU_HANDLE_INPUT_EVENT
 static int input_handle_event_handler_pre(struct kprobe *p, struct pt_regs *regs)
 {
     unsigned int *type = (unsigned int *)&PT_REGS_PARM2(regs);
@@ -603,24 +612,35 @@ static int input_handle_event_handler_pre(struct kprobe *p, struct pt_regs *regs
     int *value = (int *)&PT_REGS_CCALL_PARM4(regs);
     return ksu_handle_input_handle_event(type, code, value);
 }
+#endif
 
+#ifdef CONFIG_KSU_HANDLE_INPUT_EVENT
 static struct kprobe input_event_kp = {
     .symbol_name = "input_event",
     .pre_handler = input_handle_event_handler_pre,
 };
+#endif
 
+#ifdef CONFIG_KSU_HANDLE_INPUT_EVENT
 static void do_stop_input_hook(struct work_struct *work)
 {
     unregister_kprobe(&input_event_kp);
 }
+#endif
 
 static void stop_init_rc_hook()
 {
+    static bool rc_hook_stopped = false;
+    if (rc_hook_stopped) {
+        return;
+    }
+    rc_hook_stopped = true;
     ksu_syscall_table_unhook(__NR_read);
     ksu_syscall_table_unhook(__NR_fstat);
     pr_info("unregister init_rc syscall hook\n");
 }
 
+#ifdef CONFIG_KSU_HANDLE_INPUT_EVENT
 void ksu_stop_input_hook_runtime(void)
 {
     static bool input_hook_stopped = false;
@@ -631,6 +651,7 @@ void ksu_stop_input_hook_runtime(void)
     bool ret = schedule_work(&stop_input_hook_work);
     pr_info("unregister input kprobe: %d!\n", ret);
 }
+#endif
 
 // ksud: module support
 void __init ksu_ksud_init()
@@ -640,18 +661,24 @@ void __init ksu_ksud_init()
     ksu_syscall_table_hook(__NR_read, ksu_sys_read, &orig_sys_read);
     ksu_syscall_table_hook(__NR_fstat, ksu_sys_fstat, &orig_sys_fstat);
 
+#ifdef CONFIG_KSU_HANDLE_INPUT_EVENT
     ret = register_kprobe(&input_event_kp);
     pr_info("ksud: input_event_kp: %d\n", ret);
+#endif
 
+#ifdef CONFIG_KSU_HANDLE_INPUT_EVENT
     INIT_WORK(&stop_input_hook_work, do_stop_input_hook);
+#endif
 }
 
 void __exit ksu_ksud_exit()
 {
     // TODO:
     // this should be done before unregister vfs_read_kp
-    // stop_init_rc_hook();
-    unregister_kprobe(&input_event_kp);
+    stop_init_rc_hook();
+#ifdef CONFIG_KSU_HANDLE_INPUT_EVENT
+    ksu_stop_input_hook_runtime();
+#endif
 
     if (module_rc_buf) {
         free_module_rc();
