@@ -13,6 +13,8 @@
 #define ZYGOTE_CONTEXT "u:r:zygote:s0"
 #define INIT_CONTEXT "u:r:init:s0"
 
+#ifdef CONFIG_KSU_SELINUX
+
 void setup_selinux(const char *, struct cred *);
 
 void setenforce(bool);
@@ -21,13 +23,7 @@ bool getenforce();
 
 void cache_sid(void);
 
-bool is_task_ksu_domain(const struct cred *cred);
-
 bool is_ksu_domain();
-
-bool is_zygote(const struct cred *cred);
-
-bool is_init(const struct cred *cred);
 
 void apply_kernelsu_rules();
 
@@ -37,6 +33,15 @@ void setup_ksu_cred();
 
 void escape_to_root_for_adb_root();
 
+#ifdef CONFIG_KSU_SELINUX
 extern u32 ksu_file_sid;
+#endif
+#endif
+
+bool is_task_ksu_domain(const struct cred *cred);
+
+bool is_zygote(const struct cred *cred);
+
+bool is_init(const struct cred *cred);
 
 #endif
