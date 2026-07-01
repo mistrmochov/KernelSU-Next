@@ -1,4 +1,6 @@
+#ifdef CONFIG_KSU_SELINUX
 #include "feature/selinux_hide.h"
+#endif
 #include <linux/err.h>
 #include <linux/fs.h>
 #include <linux/namei.h>
@@ -31,8 +33,12 @@ void on_post_fs_data(void)
     ksu_load_allow_list();
     ksu_observer_init();
     // Sanity check for safe mode only needs early-boot input samples.
+#ifdef CONFIG_KSU_HANDLE_INPUT_EVENT
     ksu_stop_input_hook_runtime();
+#ifdef CONFIG_KSU_SELINUX
     ksu_selinux_hide_handle_post_fs_data();
+#endif
+#endif
 }
 
 extern void ext4_unregister_sysfs(struct super_block *sb);
@@ -69,6 +75,8 @@ void on_boot_completed(void)
     ksu_boot_completed = true;
     pr_info("on_boot_completed!\n");
     track_throne(true);
+#ifdef CONFIG_KSU_SELINUX
     ksu_selinux_hide_drop_backup_if_unused();
+#endif
     ksu_avc_spoof_late_init();
 }
