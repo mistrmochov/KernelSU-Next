@@ -22,7 +22,9 @@
 #include "selinux/selinux.h"
 #include "hook/syscall_hook.h"
 #include "feature/adb_root.h"
+#ifdef CONFIG_KSU_SELINUX
 #include "feature/selinux_hide.h"
+#endif
 #include "feature/sulog.h"
 #include "infra/symbol_resolver.h"
 
@@ -102,7 +104,7 @@ int __init kernelsu_init(void)
     }
 #endif
 
-#ifdef MODULE
+#if defined(MODULE) && !defined(CONFIG_KSU_NON_ANDROID)
 	ksu_late_loaded = (current->pid != 1);
 #else
 	ksu_late_loaded = false;
@@ -138,16 +140,20 @@ int __init kernelsu_init(void)
 
 	ksu_lsm_hook_init();
 
+#ifdef CONFIG_KSU_SELINUX
 	ksu_selinux_hide_init();
+#endif
 
 	ksu_supercalls_init();
 
 	if (ksu_late_loaded) {
 		pr_info("late load mode, skipping kprobe hooks\n");
 
+#if defined(MODULE) && !defined(CONFIG_KSU_NON_ANDROID)
 		apply_kernelsu_rules();
 		cache_sid();
 		setup_ksu_cred();
+#endif
 
 		// Grant current process (ksud late-load) root
 		// with KSU SELinux domain before enforcing SELinux, so it
@@ -166,10 +172,12 @@ int __init kernelsu_init(void)
 		ksu_boot_completed = true;
 		track_throne(false);
 
+#ifdef CONFIG_KSU_SELINUX
 		if (!getenforce()) {
 			pr_info("Permissive SELinux, enforcing\n");
 			setenforce(true);
 		}
+#endif
 
 	} else {
 		ksu_syscall_hook_manager_init();
@@ -184,7 +192,7 @@ int __init kernelsu_init(void)
 	}
 
 #ifdef MODULE
-#ifndef CONFIG_KSU_DEBUG
+#if !(defined(CONFIG_KSU_DEBUG) || defined(CONFIG_KSU_NON_ANDROID))
 	kobject_del(&THIS_MODULE->mkobj.kobj);
 #endif
 #endif
@@ -204,14 +212,18 @@ void __exit kernelsu_exit(void)
 	// Wait for any in-flight RCU readers (e.g. handler traversing allow_list)
 	synchronize_rcu();
 
-	// Phase 2: Now safe to release data structures
-	ksu_observer_exit();
+  if (ksu_late_loaded)
+  {
+      ksu_observer_exit();
+  }
 
 	ksu_throne_tracker_exit();
 
 	ksu_allowlist_exit();
 
+#ifdef CONFIG_KSU_SELINUX
 	ksu_selinux_hide_exit();
+#endif
 
 	ksu_lsm_hook_exit();
 
