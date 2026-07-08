@@ -59,10 +59,10 @@ class SulogViewModel : ViewModel() {
         }
     }
 
-    fun refresh(preferredFilePath: String? = _uiState.value.selectedFilePath) {
+    fun refresh(preferredFilePath: String? = _uiState.value.selectedFilePath, refreshing: Boolean = false) {
         refreshJob?.cancel()
         refreshJob = viewModelScope.launch(Dispatchers.IO) {
-            _uiState.update { it.copy(isLoading = true, errorMessage = null) }
+            _uiState.update { it.copy(isLoading = !refreshing, isRefreshing = refreshing, errorMessage = null) }
             runCatching {
                 val sulogStatus = getFeatureStatus("sulog")
                 val isSulogEnabled = getFeaturePersistValue("sulog") == 1L
@@ -80,6 +80,7 @@ class SulogViewModel : ViewModel() {
                 entriesFlow.value = entries
                 SulogUiState(
                     isLoading = false,
+                    isRefreshing = false,
                     sulogStatus = sulogStatus,
                     isSulogEnabled = isSulogEnabled,
                     searchText = currentState.searchText,
@@ -98,6 +99,7 @@ class SulogViewModel : ViewModel() {
                 _uiState.update {
                     it.copy(
                         isLoading = false,
+                        isRefreshing = false,
                         errorMessage = error.message,
                     )
                 }
@@ -105,8 +107,8 @@ class SulogViewModel : ViewModel() {
         }
     }
 
-    fun refreshLatest() {
-        refresh(preferredFilePath = null)
+    fun refreshLatest(refreshing: Boolean = false) {
+        refresh(preferredFilePath = null, refreshing = refreshing)
     }
 
     fun enableSulog() {
