@@ -165,17 +165,8 @@ int ksu_observer_init(void)
 
 void __exit ksu_observer_exit(void)
 {
-	unwatch_one_dir(&g_watch);
-	/*
-	 * A group's marks are released by a delayed work
-	 * (fsnotify_mark_destroy_workfn) that runs after synchronize_srcu() and calls
-	 * group->ops->free_mark(), reading mark->group on the way.  Drain that work
-	 * *before* dropping the group: dropping it first makes those callbacks read a
-	 * freed group, and returning before the work has run at all lets the module be
-	 * unloaded while the callback text is still pending - either way, a
-	 * use-after-free in fsnotify_mark_destroy_workfn.
-	 */
-	fsnotify_wait_marks_destroyed();
-	fsnotify_put_group(g);
-	pr_info("observer exit done\n");
+  unwatch_one_dir(&g_watch);
+  if (g)
+    fsnotify_put_group(g);
+  pr_info("observer exit done\n");
 }
