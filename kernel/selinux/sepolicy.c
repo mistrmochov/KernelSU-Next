@@ -1,3 +1,4 @@
+#ifdef CONFIG_KSU_SELINUX
 #include "ss/avtab.h"
 #include "ss/constraint.h"
 #include "ss/ebitmap.h"
@@ -1111,3 +1112,4 @@ int ksu_policydb_fixup_len(struct policydb *db, const char *tag)
     }
     return ret;
 }
+#endif
